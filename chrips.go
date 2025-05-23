@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -15,8 +16,64 @@ import (
 var profanityMap = map[string]bool{"kerfuffle": true, "sharbert": true, "fornax": true}
 
 const (
-	chripMaxLength = 140
+	chripMaxLength       = 140
+	chirpIdPathValueName = "chripID"
 )
+
+func handleGetChirp(w http.ResponseWriter, r *http.Request) {
+	chirpIdString := r.PathValue(chirpIdPathValueName)
+	dbChirp, err := cfg.DbQueries.GetChirp(r.Context(), uuid.MustParse(chirpIdString))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(404)
+			return
+		} else {
+			log.Println(err)
+			w.WriteHeader(500)
+			return
+		}
+	}
+
+	chirp := GetChirpFromDbChirp(dbChirp)
+	bytes, err := json.Marshal(chirp)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w.WriteHeader(200)
+	w.Header().Add("content-type", "application/json")
+	w.Write(bytes)
+
+}
+
+func handleGetAllChirps(w http.ResponseWriter, r *http.Request) {
+	allDbChirps, err := cfg.DbQueries.GetAllChirps(r.Context())
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+
+	chirpCount := len(allDbChirps)
+	chirps := make([]Chirp, chirpCount)
+	for i, dbChirp := range allDbChirps {
+		insertIndex := chirpCount - 1 - i
+		chirps[insertIndex] = GetChirpFromDbChirp(dbChirp)
+	}
+
+	bytes, err := json.Marshal(chirps)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w.WriteHeader(200)
+	w.Header().Add("content-type", "application/json")
+	w.Write(bytes)
+}
 
 func handlePostChirp(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
@@ -60,7 +117,7 @@ func handlePostChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chirp := GetChirpFromDb(dbChirp)
+	chirp := GetChirpFromDbChirp(dbChirp)
 	bytes, err := json.Marshal(chirp)
 	if err != nil {
 		log.Println(err)
@@ -107,7 +164,7 @@ type Chirp struct {
 	Body      string    `json:"body"`
 }
 
-func GetChirpFromDb(dbChirp database.Chirp) (chirp Chirp) {
+func GetChirpFromDbChirp(dbChirp database.Chirp) (chirp Chirp) {
 	chirp = Chirp{
 		ID:        dbChirp.ID,
 		UserID:    dbChirp.UserID,

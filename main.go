@@ -47,6 +47,8 @@ func registerApiHanlders(serveMux *http.ServeMux) {
 		w.Write([]byte("OK"))
 	})
 
+	serveMux.HandleFunc(fmt.Sprintf("GET /api/chirps/{%v}", chirpIdPathValueName), handleGetChirp)
+	serveMux.HandleFunc("GET /api/chirps", handleGetAllChirps)
 	serveMux.HandleFunc("POST /api/chirps", handlePostChirp)
 	serveMux.HandleFunc("GET /api/users", handleGetUsers)
 	serveMux.HandleFunc("POST /api/users", handleUserCreation)

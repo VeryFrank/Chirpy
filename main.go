@@ -21,6 +21,10 @@ var profanityMap = map[string]bool{"kerfuffle": true, "sharbert": true, "fornax"
 var cfg = apiConfig{}
 var envCfg environmentConfig
 
+const (
+	chripMaxLength = 140
+)
+
 func main() {
 	envCfg = GetEnvironmentConfig()
 	db, err := sql.Open("postgres", envCfg.DbConnectionString)
@@ -52,77 +56,7 @@ func registerApiHanlders(serveMux *http.ServeMux) {
 		w.Write([]byte("OK"))
 	})
 
-	serveMux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
-		jsonBody := jsonBody{}
-		decoder := json.NewDecoder(r.Body)
-		err := decoder.Decode(&jsonBody)
-		if err != nil {
-			log.Printf("Error decoding parameters: %s", err)
-			w.WriteHeader(500)
-
-			jsonErrorResp := jsonErrorResp{
-				Error: "Something went wrong",
-			}
-
-			jsonBytes, err := json.Marshal(jsonErrorResp)
-			if err != nil {
-				log.Printf("Error marshaling json: %s", err)
-				return
-			}
-
-			w.Write(jsonBytes)
-			return
-		}
-
-		if len(jsonBody.Body) <= 140 {
-			//length ok, check for prafanity
-			words := strings.Split(jsonBody.Body, " ")
-			cleanedBody := ""
-			for i, word := range words {
-				lowerWord := strings.ToLower(word)
-
-				if i > 0 {
-					cleanedBody += " "
-				}
-
-				if profanityMap[lowerWord] {
-					cleanedBody += "****"
-
-				} else {
-					cleanedBody += word
-				}
-			}
-
-			answerJson := jsonValidResp{
-				CleanedBody: cleanedBody,
-			}
-
-			jsonBytes, err := json.Marshal(answerJson)
-			if err != nil {
-				log.Printf("Error marshaling json %s", err)
-				return
-			}
-
-			w.WriteHeader(200)
-			w.Header().Add("content-type", "application/json")
-			w.Write(jsonBytes)
-		} else {
-			jsonErrorResp := jsonErrorResp{
-				Error: "Chirp is too long",
-			}
-
-			jsonBytes, err := json.Marshal(jsonErrorResp)
-			if err != nil {
-				log.Printf("Error marshaling json %s", err)
-				return
-			}
-
-			w.WriteHeader(400)
-			w.Header().Add("content-type", "application/json")
-			w.Write(jsonBytes)
-		}
-	})
-
+	serveMux.HandleFunc("POST /api/chirps", handlePostChirp)
 	serveMux.HandleFunc("GET /api/users", handleGetUsers)
 	serveMux.HandleFunc("POST /api/users", handleUserCreation)
 }
@@ -187,8 +121,7 @@ func handleUserCreation(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
-	emailNullString := sql.NullString{String: emailWrapper.Email, Valid: true}
-	user, err := cfg.DbQueries.CreateUser(r.Context(), emailNullString)
+	user, err := cfg.DbQueries.CreateUser(r.Context(), emailWrapper.Email)
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(500)
@@ -196,10 +129,10 @@ func handleUserCreation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	creationAnswer := User{
-		ID:        user.ID.UUID,
-		CreatedAt: user.CreatedAt.Time,
-		UpdatedAt: user.UpdatedAt.Time,
-		Email:     user.Email.String,
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
 	}
 
 	bytes, err := json.Marshal(creationAnswer)
@@ -212,6 +145,82 @@ func handleUserCreation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(201)
 	w.Header().Add("content-type", "application/json")
 	w.Write(bytes)
+}
+
+func handlePostChirp(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	postChirp := postChirp{}
+	err := decoder.Decode(&postChirp)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+
+	chirpLength := len(postChirp.Body)
+	if chirpLength > chripMaxLength {
+		jsonErrorResp := jsonErrorResp{
+			Error: "Chirp is too long",
+		}
+
+		jsonBytes, err := json.Marshal(jsonErrorResp)
+		if err != nil {
+			log.Printf("Error marshaling json %s", err)
+			return
+		}
+
+		w.WriteHeader(400)
+		w.Header().Add("content-type", "application/json")
+		w.Write(jsonBytes)
+
+		return
+	} //chirp too long?
+
+	postChirp.Body = cleanChirp(postChirp.Body)
+	params := database.CreateChirpParams{
+		UserID: postChirp.UserId,
+		Body:   sql.NullString{String: postChirp.Body, Valid: true},
+	}
+
+	dbChirp, err := cfg.DbQueries.CreateChirp(r.Context(), params)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+
+	chirp := GetChirpFromDb(dbChirp)
+	bytes, err := json.Marshal(chirp)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w.WriteHeader(201)
+	w.Header().Add("content-type", "application/json")
+	w.Write(bytes)
+}
+
+func cleanChirp(chirp string) (cleanedChirp string) {
+	words := strings.Split(chirp, " ")
+	cleanedChirp = ""
+	for i, word := range words {
+		lowerWord := strings.ToLower(word)
+
+		if i > 0 {
+			cleanedChirp += " "
+		}
+
+		if profanityMap[lowerWord] {
+			cleanedChirp += "****"
+
+		} else {
+			cleanedChirp += word
+		}
+	}
+
+	return cleanedChirp
 }
 
 type apiConfig struct {
@@ -287,10 +296,10 @@ type User struct {
 
 func getUserFromDbUser(dbUser database.User) User {
 	return User{
-		ID:        dbUser.ID.UUID,
-		CreatedAt: dbUser.CreatedAt.Time,
-		UpdatedAt: dbUser.UpdatedAt.Time,
-		Email:     dbUser.Email.String,
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt,
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
 	}
 }
 
@@ -308,4 +317,29 @@ func GetEnvironmentConfig() environmentConfig {
 	}
 
 	return envCfg
+}
+
+type postChirp struct {
+	Body   string    `json:"body"`
+	UserId uuid.UUID `json:"user_id"`
+}
+
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+}
+
+func GetChirpFromDb(dbChirp database.Chirp) (chirp Chirp) {
+	chirp = Chirp{
+		ID:        dbChirp.ID,
+		UserID:    dbChirp.UserID,
+		CreatedAt: dbChirp.CreatedAt,
+		UpdatedAt: dbChirp.UpdatedAt,
+		Body:      dbChirp.Body.String,
+	}
+
+	return chirp
 }

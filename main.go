@@ -13,13 +13,8 @@ import (
 	"github.com/veryfrank/Chirpy/internal/database"
 )
 
-var profanityMap = map[string]bool{"kerfuffle": true, "sharbert": true, "fornax": true}
 var cfg = apiConfig{}
 var envCfg environmentConfig
-
-const (
-	chripMaxLength = 140
-)
 
 func main() {
 	envCfg = GetEnvironmentConfig()

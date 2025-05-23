@@ -12,6 +12,12 @@ import (
 	"github.com/veryfrank/Chirpy/internal/database"
 )
 
+var profanityMap = map[string]bool{"kerfuffle": true, "sharbert": true, "fornax": true}
+
+const (
+	chripMaxLength = 140
+)
+
 func handlePostChirp(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	postChirp := postChirp{}

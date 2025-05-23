@@ -271,16 +271,8 @@ func (cfg *apiConfig) resetMetricsHandler(respWriter http.ResponseWriter, req *h
 	}
 }
 
-type jsonBody struct {
-	Body string `json:"body"`
-}
-
 type jsonErrorResp struct {
 	Error string `json:"error"`
-}
-
-type jsonValidResp struct {
-	CleanedBody string `json:"cleaned_body"`
 }
 
 type jsonEmail struct {

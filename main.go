@@ -52,6 +52,7 @@ func registerApiHanlders(serveMux *http.ServeMux) {
 	serveMux.HandleFunc("POST /api/chirps", handlePostChirp)
 	serveMux.HandleFunc("GET /api/users", handleGetUsers)
 	serveMux.HandleFunc("POST /api/users", handleUserCreation)
+	serveMux.HandleFunc("POST /api/login", handleUserLogin)
 }
 
 func registerAdminHandlers(serveMux *http.ServeMux) {
@@ -110,10 +111,6 @@ func (cfg *apiConfig) resetMetricsHandler(respWriter http.ResponseWriter, req *h
 
 type jsonErrorResp struct {
 	Error string `json:"error"`
-}
-
-type jsonEmail struct {
-	Email string `json:"email"`
 }
 
 type environmentConfig struct {

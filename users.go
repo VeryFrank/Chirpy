@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/veryfrank/Chirpy/internal/auth"
 	"github.com/veryfrank/Chirpy/internal/database"
 )
 
@@ -37,8 +38,8 @@ func handleGetUsers(w http.ResponseWriter, r *http.Request) {
 
 func handleUserCreation(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
-	var emailWrapper jsonEmail
-	err := decoder.Decode(&emailWrapper)
+	var jsonCreateUser jsonCreateUser
+	err := decoder.Decode(&jsonCreateUser)
 	if err != nil {
 		log.Println(err)
 
@@ -46,25 +47,40 @@ func handleUserCreation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(emailWrapper.Email) <= 5 {
+	HasValidEmail := jsonCreateUser.HasValidEmail()
+	if !HasValidEmail {
 		errResp := jsonErrorResp{
 			Error: "invalid email",
 		}
 
-		bytes, err := json.Marshal(errResp)
-		if err != nil {
-			log.Println(err)
-			w.WriteHeader(500)
-			return
-		}
-
-		w.WriteHeader(400)
-		w.Header().Add("content-type", "application/json")
-		w.Write(bytes)
-
+		SendErrorResponse(errResp, 400, w, r)
 		return
 	}
-	user, err := cfg.DbQueries.CreateUser(r.Context(), emailWrapper.Email)
+
+	hasValidPassword := jsonCreateUser.HasValidPassword()
+	if !hasValidPassword {
+		errResp := jsonErrorResp{
+			Error: "invalid password",
+		}
+
+		SendErrorResponse(errResp, 400, w, r)
+		return
+	}
+
+	hashedPw, err := auth.HashPassword(jsonCreateUser.Password)
+	if err != nil {
+		log.Println(err)
+
+		w.WriteHeader(500)
+		return
+	}
+
+	createUserParams := database.CreateUserParams{
+		Email:          jsonCreateUser.Email,
+		HashedPassword: hashedPw,
+	}
+
+	user, err := cfg.DbQueries.CreateUser(r.Context(), createUserParams)
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(500)
@@ -90,11 +106,71 @@ func handleUserCreation(w http.ResponseWriter, r *http.Request) {
 	w.Write(bytes)
 }
 
+func handleUserLogin(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	var login jsonLogin
+	err := decoder.Decode(&login)
+	if err != nil {
+		log.Println(err)
+
+		w.WriteHeader(500)
+		return
+	}
+
+	dbUser, err := cfg.DbQueries.GetUser(r.Context(), login.Email)
+	if err != nil {
+		log.Println(err)
+
+		jsonErrorResp := jsonErrorResp{
+			Error: "Incorrect email or password",
+		}
+		SendErrorResponse(jsonErrorResp, 401, w, r)
+
+		return
+	}
+
+	err = auth.CheckPasswordHash(dbUser.HashedPassword, login.Password)
+	if err != nil {
+		jsonErrorResp := jsonErrorResp{
+			Error: "Incorrect email or password",
+		}
+		SendErrorResponse(jsonErrorResp, 401, w, r)
+
+		return
+	}
+
+	user := getUserFromDbUser(dbUser)
+	bytes, err := json.Marshal(user)
+	if err != nil {
+		println(err)
+
+		w.WriteHeader(500)
+		return
+	}
+
+	w.WriteHeader(200)
+	w.Header().Add("content-type", "application/json")
+	w.Write(bytes)
+}
+
+func SendErrorResponse(errResp jsonErrorResp, statusCode int, w http.ResponseWriter, r *http.Request) {
+	bytes, err := json.Marshal(errResp)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w.WriteHeader(statusCode)
+	w.Header().Add("content-type", "application/json")
+	w.Write(bytes)
+}
+
 type User struct {
-	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
+	ID        uuid.UUID `json:"id"`
 }
 
 func getUserFromDbUser(dbUser database.User) User {
@@ -104,4 +180,22 @@ func getUserFromDbUser(dbUser database.User) User {
 		UpdatedAt: dbUser.UpdatedAt,
 		Email:     dbUser.Email,
 	}
+}
+
+type jsonCreateUser struct {
+	Password string `json:"password"`
+	Email    string `json:"email"`
+}
+
+func (j *jsonCreateUser) HasValidEmail() bool {
+	return (len(j.Email) >= 5)
+}
+
+func (j *jsonCreateUser) HasValidPassword() bool {
+	return len(j.Password) >= 5
+}
+
+type jsonLogin struct {
+	Password string `json:"password"`
+	Email    string `json:"email"`
 }
